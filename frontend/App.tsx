@@ -9,34 +9,69 @@ import { Input } from "@/components/ui/input";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { useEffect, useRef, useState } from "react";
 import { extractMovePackage } from "./utils/helpers";
-import { Hex } from "@aptos-labs/ts-sdk";
 import { UploadSpinner } from "./components/UploadSpinner";
 
+interface NamedAddresse {
+  name: string;
+  address: string;
+}
+
 function App() {
-  const { connected, account, wallet, signAndSubmitTransaction } = useWallet();
+  const { connected, account, wallet } = useWallet();
 
   // Internal state
   const [files, setFiles] = useState<FileList | null>(null);
   const [data, setData] = useState<any>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [senderAddress, setSenderAddress] = useState<string>();
+  // State to store the name-address pairs
+  const [namedAddresses, setNamedAddresses] = useState<NamedAddresse[]>([{ name: "", address: "" }]);
   // Local Ref
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    setSenderAddress(account?.address || "");
-  }, [account]);
-  console.log("senderAddress", senderAddress);
+  // Function to handle input changes
+  const handleInputChange = (index: number, event: React.ChangeEvent<HTMLInputElement>) => {
+    const values = [...namedAddresses];
+    values[index][event.target.name as keyof NamedAddresse] = event.target.value;
+    setNamedAddresses(values);
+  };
+
+  // Function to add a new input field
+  const handleAddFields = () => {
+    setNamedAddresses([...namedAddresses, { name: "", address: "" }]);
+  };
+
+  // Function to remove an input field
+  const handleRemoveFields = (index: number) => {
+    const values = [...namedAddresses];
+    values.splice(index, 1);
+    setNamedAddresses(values);
+  };
+
   const onCompileClick = async () => {
     if (!account) throw new Error("Please connect your wallet");
     if (!files) throw new Error("Please upload a Move project folder");
 
-    setIsUploading(true);
     const folderObject = await extractMovePackage(files);
-    const project = { ...folderObject, senderAddress: senderAddress };
+
+    // Convert fields to object
+    const namedAddressesObject = namedAddresses.reduce(
+      (obj, field) => {
+        if (field.name && field.address) {
+          obj[field.name] = field.address;
+        }
+        return obj;
+      },
+      {} as { [key: string]: string },
+    );
+
+    const project = {
+      ...folderObject,
+      namedAddresses: namedAddressesObject,
+    };
 
     try {
-      const response = await fetch("https://web-compiler-275734728368.us-central1.run.app/compile", {
+      setIsUploading(true);
+      const response = await fetch("http://localhost:3000/compile", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -52,19 +87,6 @@ function App() {
     }
   };
 
-  const onPublishClick = async () => {
-    const response = await signAndSubmitTransaction({
-      data: {
-        function: "0x1::code::publish_package_txn",
-        functionArguments: [
-          Hex.fromHexInput(data.metadataBytes).toUint8Array(),
-          [Hex.fromHexInput(data.byteCode[0]).toUint8Array()],
-        ],
-      },
-    });
-    console.log("response", response);
-  };
-
   return (
     <>
       <Header />
@@ -74,15 +96,6 @@ function App() {
           <>
             <Card className="w-1/2 mb-10">
               <CardContent className="flex flex-col gap-10 pt-6">
-                <div>
-                  <Label>Sender address</Label>
-                  <Input type="text" value={account?.address} onChange={(e) => setSenderAddress(e.target.value)} />
-                  <p>
-                    This address will be used to <code>compile</code> the package, so make sure it is the same address
-                    you use to <code>publish</code> the package
-                  </p>
-                </div>
-
                 {!files?.length && (
                   <div>
                     <Label
@@ -129,6 +142,34 @@ function App() {
                   </div>
                 )}
 
+                <div className="flex flex-col gap-2">
+                  <h1>Named Addresses</h1>
+                  {namedAddresses.map((field, index) => (
+                    <div key={index} className="flex flex-row gap-2">
+                      <Input
+                        type="text"
+                        name="name"
+                        placeholder="Enter name"
+                        value={field.name}
+                        onChange={(event) => handleInputChange(index, event)}
+                      />
+                      <Input
+                        type="text"
+                        name="address"
+                        placeholder="Enter address"
+                        value={field.address}
+                        onChange={(event) => handleInputChange(index, event)}
+                      />
+                      <Button type="button" onClick={() => handleRemoveFields(index)}>
+                        Remove
+                      </Button>
+                    </div>
+                  ))}
+                  <Button type="button" onClick={handleAddFields} className="w-fit">
+                    Add More
+                  </Button>
+                </div>
+
                 <Button onClick={onCompileClick} disabled={!files || !account}>
                   Compile
                 </Button>
@@ -146,7 +187,6 @@ function App() {
                     showLineNumbers={false}
                     codeBlock
                   />
-                  <Button onClick={onPublishClick}>Publish Package</Button>
                 </CardContent>
               </Card>
             )}
