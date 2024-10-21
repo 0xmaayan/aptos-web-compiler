@@ -1,4 +1,4 @@
-import { useWallet } from "@aptos-labs/wallet-adapter-react";
+import { InputTransactionData, useWallet } from "@aptos-labs/wallet-adapter-react";
 import { CopyBlock, dracula } from "react-code-blocks";
 
 // Internal Components
@@ -7,9 +7,12 @@ import { Header } from "@/components/Header";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { extractMovePackage } from "./utils/helpers";
 import { UploadSpinner } from "./components/UploadSpinner";
+import { Aptos, AptosConfig } from "@aptos-labs/ts-sdk";
+import { useToast } from "./components/ui/use-toast";
+import { TransactionHash } from "./components/TransactionHash";
 
 interface NamedAddresse {
   name: string;
@@ -17,7 +20,8 @@ interface NamedAddresse {
 }
 
 function App() {
-  const { connected, account, wallet } = useWallet();
+  const { connected, account, wallet, signAndSubmitTransaction, network } = useWallet();
+  const { toast } = useToast();
 
   // Internal state
   const [files, setFiles] = useState<FileList | null>(null);
@@ -71,7 +75,7 @@ function App() {
 
     try {
       setIsUploading(true);
-      const response = await fetch("http://localhost:3000/compile", {
+      const response = await fetch("https://web-compiler-275734728368.us-central1.run.app/compile", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -84,6 +88,34 @@ function App() {
       console.error("Network error:", error);
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const onPublishClick = async () => {
+    const aptosConfig = new AptosConfig({ network: network?.name });
+    const aptos = new Aptos(aptosConfig);
+    try {
+      const transaction: InputTransactionData = {
+        data: {
+          function: "0x1::code::publish_package_txn",
+          functionArguments: [data.metadataBytes, data.byteCode],
+        },
+      };
+      const response = await signAndSubmitTransaction(transaction);
+      await aptos.waitForTransaction({
+        transactionHash: response.hash,
+      });
+      toast({
+        title: "Success",
+        description: <TransactionHash hash={response.hash} network={network} />,
+      });
+    } catch (error: any) {
+      console.log("error", error);
+      toast({
+        variant: "destructive",
+        title: "Transaction submission failed",
+        description: `Your transaction failed to submit. ${error}`,
+      });
     }
   };
 
@@ -177,18 +209,23 @@ function App() {
             </Card>
 
             {data && (
-              <Card className="w-1/2">
-                <CardContent className="flex flex-col gap-10 pt-6">
-                  <CopyBlock
-                    text={JSON.stringify(data, null, 2)}
-                    wrapLongLines={true}
-                    language="jsx"
-                    theme={dracula}
-                    showLineNumbers={false}
-                    codeBlock
-                  />
-                </CardContent>
-              </Card>
+              <>
+                <Card className="w-1/2">
+                  <CardContent className="flex flex-col gap-10 pt-6">
+                    <CopyBlock
+                      text={JSON.stringify(data, null, 2)}
+                      wrapLongLines={true}
+                      language="jsx"
+                      theme={dracula}
+                      showLineNumbers={false}
+                      codeBlock
+                    />
+                  </CardContent>
+                </Card>
+                <Button onClick={onPublishClick} className="w-1/2">
+                  Publish
+                </Button>
+              </>
             )}
           </>
         ) : (
